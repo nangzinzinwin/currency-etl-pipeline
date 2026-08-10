@@ -4,12 +4,15 @@ on:
   schedule:
     - cron: '30 1 * * *'
 
-
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   run-etl:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,3 +29,14 @@ jobs:
 
       - name: Run ETL script
         run: python main.py
+
+      - name: Save database changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add exchange_rates.db
+
+          git diff --cached --quiet || git commit -m "Update currency exchange rate database"
+
+          git push
