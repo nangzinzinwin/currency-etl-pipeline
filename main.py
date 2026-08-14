@@ -8,6 +8,51 @@ from datetime import datetime
 RETENTION_DAYS = 7
 
 
+def fetch_currency_data():
+    """
+    Fetch currency exchange rate data from Frankfurter API.
+    """
+
+    url = "https://api.frankfurter.app/latest?from=EUR&to=USD,JPY,GBP,THB"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+
+    response = requests.get(
+        url,
+        headers=headers,
+        timeout=10
+    )
+
+    response.raise_for_status()
+
+    return response.json()
+
+
+def transform_currency_data(data: dict) -> pd.DataFrame:
+    """
+    Transform API JSON data into a Pandas DataFrame.
+    """
+
+    base_currency = data['base']
+    rate_date = data['date']
+    rates_dict = data['rates']
+
+    df = pd.DataFrame(
+        list(rates_dict.items()),
+        columns=['target_currency', 'exchange_rate']
+    )
+
+    df['base_currency'] = base_currency
+    df['rate_date'] = rate_date
+    df['created_at'] = datetime.now().strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+    return df
+
+
 def validate_currency_data(df: pd.DataFrame):
     """
     Validate currency exchange rate data.
@@ -39,107 +84,107 @@ def validate_currency_data(df: pd.DataFrame):
     print("All data validation checks passed successfully!")
 
 
-print("1. Fetching data from API...")
+def save_to_database(df: pd.DataFrame):
+    """
+    Save currency data to SQLite database.
+    """
 
-url = "https://api.frankfurter.app/latest?from=EUR&to=USD,JPY,GBP,THB"
+    conn = sqlite3.connect("exchange_rates.db")
 
-# Add a User-Agent header
-headers = {
-    "User-Agent": "Mozilla/5.0"
-}
-
-try:
-    # Send API request
-    response = requests.get(
-        url,
-        headers=headers,
-        timeout=10
+    df.to_sql(
+        "currency_rates",
+        conn,
+        if_exists="append",
+        index=False
     )
 
-    if response.status_code == 200:
+    conn.commit()
 
-        # Convert response to JSON
-        data = response.json()
+    print("Data successfully loaded into the database!")
+
+    return conn
+
+
+def remove_old_data(conn):
+    """
+    Remove data older than the retention period.
+    """
+
+    conn.execute(f"""
+        DELETE FROM currency_rates
+        WHERE rate_date < date('now', '-{RETENTION_DAYS} days')
+    """)
+
+    conn.commit()
+
+    print(
+        f"Data older than {RETENTION_DAYS} days "
+        "has been deleted."
+    )
+
+
+def verify_database(conn):
+    """
+    Read and display the current database content.
+    """
+
+    print("\n--- Verifying Database Content ---")
+
+    result_df = pd.read_sql_query(
+        "SELECT * FROM currency_rates",
+        conn
+    )
+
+    print(result_df)
+
+
+def main():
+    """
+    Run the Currency ETL Pipeline.
+    """
+
+    print("1. Fetching data from API...")
+
+    try:
+        # Extract
+        data = fetch_currency_data()
 
         print("Raw JSON Data fetched successfully!")
 
+        # Transform
         print("\n2. Transforming data...")
 
-        # Extract API data
-        base_currency = data['base']
-        rate_date = data['date']
-        rates_dict = data['rates']
-
-        # Convert dictionary to Pandas DataFrame
-        df = pd.DataFrame(
-            list(rates_dict.items()),
-            columns=['target_currency', 'exchange_rate']
-        )
-
-        # Add additional columns
-        df['base_currency'] = base_currency
-        df['rate_date'] = rate_date
-        df['created_at'] = datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        df = transform_currency_data(data)
 
         print("Transformed DataFrame:")
         print(df)
 
-        # Validate currency data
+        # Validate
         validate_currency_data(df)
 
+        # Load
         print("\n3. Saving data to SQLite Database...")
 
-        # Connect to SQLite database
-        conn = sqlite3.connect("exchange_rates.db")
+        conn = save_to_database(df)
 
-        # Save DataFrame to database
-        df.to_sql(
-            "currency_rates",
-            conn,
-            if_exists="append",
-            index=False
-        )
+        # Retention
+        remove_old_data(conn)
 
-        print("Data successfully loaded into the database!")
-
-        # Remove data older than the retention period
-        conn.execute(f"""
-            DELETE FROM currency_rates
-            WHERE rate_date < date('now', '-{RETENTION_DAYS} days')
-        """)
-
-        conn.commit()
-
-        print(
-            f"Data older than {RETENTION_DAYS} days "
-            "has been deleted."
-        )
-
-        print("\n--- Verifying Database Content ---")
-
-        # Read data back from database
-        result_df = pd.read_sql_query(
-            "SELECT * FROM currency_rates",
-            conn
-        )
-
-        print(result_df)
+        # Verify
+        verify_database(conn)
 
         # Close database connection
         conn.close()
 
-    else:
+    except requests.exceptions.RequestException as e:
+
+        print(f"\nConnection Error occurred: {e}")
+
         print(
-            f"Failed to fetch data. "
-            f"Status code: {response.status_code}"
+            "Please check your internet connection "
+            "or try using a VPN."
         )
 
-except requests.exceptions.RequestException as e:
 
-    print(f"\nConnection Error occurred: {e}")
-    print(
-        "Please check your internet connection "
-        "or try using a VPN."
-        )
+if __name__ == "__main__":
+    main() 
