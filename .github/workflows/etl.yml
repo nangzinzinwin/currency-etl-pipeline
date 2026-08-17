@@ -25,7 +25,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests pandas
+          pip install requests pandas pytest
+
+      - name: Run unit tests
+        run: pytest -v
 
       - name: Run ETL script
         run: python main.py
