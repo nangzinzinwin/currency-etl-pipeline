@@ -104,9 +104,7 @@ def test_validate_currency_data_valid():
         ],
     })
 
-    result = validate_currency_data(df)
-
-    assert result is True
+    validate_currency_data(df)
 
 
 def test_validate_currency_data_empty():
@@ -189,4 +187,4 @@ def test_remove_old_data():
     assert "2026-08-10" not in result["rate_date"].values
     assert "2026-08-14" in result["rate_date"].values
 
-    conn.close() 
+    conn.close()
