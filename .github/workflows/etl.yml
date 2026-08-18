@@ -28,10 +28,12 @@ jobs:
           pip install requests pandas pytest requests-mock
 
       - name: Run unit tests
-        run: pytest -v
+        run: |
+          pytest -v
 
       - name: Run ETL script
-        run: python main.py
+        run: |
+          python main.py
 
       - name: Save database changes
         run: |
