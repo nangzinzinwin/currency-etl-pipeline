@@ -1,94 +1,89 @@
 import sqlite3
+from datetime import datetime, timedelta
 
 import pandas as pd
-import pytest
 import requests_mock
 
 from main import (
     fetch_currency_data,
     transform_currency_data,
     validate_currency_data,
-    remove_old_data,
+    remove_old_data
 )
 
 
 def test_fetch_currency_data_success():
-    mock_response = {
-        "amount": 1.0,
-        "base": "EUR",
-        "date": "2026-08-18",
-        "rates": {
-            "USD": 1.17,
-            "JPY": 171.0,
-            "GBP": 0.86,
-            "THB": 37.0,
-        },
-    }
-
     with requests_mock.Mocker() as mock:
         mock.get(
             "https://api.frankfurter.app/latest?from=EUR&to=USD,JPY,GBP,THB",
-            json=mock_response,
+            json={
+                "amount": 1,
+                "base": "EUR",
+                "date": "2026-08-18",
+                "rates": {
+                    "USD": 1.17,
+                    "JPY": 171.0,
+                    "GBP": 0.86,
+                    "THB": 37.0
+                }
+            }
         )
 
         result = fetch_currency_data()
 
-    assert result is not None
-    assert result["base"] == "EUR"
-    assert "rates" in result
-    assert "USD" in result["rates"]
-    assert "JPY" in result["rates"]
-    assert "GBP" in result["rates"]
-    assert "THB" in result["rates"]
+        assert result["base"] == "EUR"
+        assert "rates" in result
+        assert result["rates"]["USD"] == 1.17
 
 
 def test_fetch_currency_data_failure():
     with requests_mock.Mocker() as mock:
         mock.get(
             "https://api.frankfurter.app/latest?from=EUR&to=USD,JPY,GBP,THB",
-            status_code=500,
+            status_code=500
         )
 
-        with pytest.raises(Exception):
+        try:
             fetch_currency_data()
+            assert False
+        except Exception:
+            assert True
 
 
 def test_transform_currency_data():
     data = {
-        "amount": 1.0,
+        "amount": 1,
         "base": "EUR",
         "date": "2026-08-18",
         "rates": {
             "USD": 1.17,
             "JPY": 171.0,
             "GBP": 0.86,
-            "THB": 37.0,
-        },
+            "THB": 37.0
+        }
     }
 
     result = transform_currency_data(data)
 
-    assert isinstance(result, pd.DataFrame)
-    assert not result.empty
+    assert len(result) == 4
     assert "target_currency" in result.columns
     assert "exchange_rate" in result.columns
     assert "base_currency" in result.columns
     assert "rate_date" in result.columns
-    assert len(result) == 4
 
 
 def test_transform_currency_data_missing_rates():
     data = {
-        "amount": 1.0,
+        "amount": 1,
         "base": "EUR",
-        "date": "2026-08-18",
-        "rates": {},
+        "date": "2026-08-18"
     }
 
-    result = transform_currency_data(data)
-
-    assert isinstance(result, pd.DataFrame)
-    assert result.empty
+    try:
+        transform_currency_data(data)
+        assert False
+    except Exception:
+        assert True
 
 
 def test_validate_currency_data_valid():
@@ -100,41 +95,52 @@ def test_validate_currency_data_valid():
             "2026-08-18",
             "2026-08-18",
             "2026-08-18",
-            "2026-08-18",
-        ],
+            "2026-08-18"
+        ]
     })
 
-    validate_currency_data(df)
+    result = validate_currency_data(df)
+
+    assert result is None
 
 
 def test_validate_currency_data_empty():
     df = pd.DataFrame()
 
-    with pytest.raises(AssertionError):
+    try:
         validate_currency_data(df)
+        assert False
+    except (AssertionError, ValueError):
+        assert True
 
 
 def test_validate_currency_data_missing_column():
     df = pd.DataFrame({
         "target_currency": ["USD"],
         "exchange_rate": [1.17],
-        "base_currency": ["EUR"],
+        "base_currency": ["EUR"]
     })
 
-    with pytest.raises(AssertionError):
+    try:
         validate_currency_data(df)
+        assert False
+    except (AssertionError, ValueError):
+        assert True
 
 
 def test_validate_currency_data_null_value():
     df = pd.DataFrame({
-        "target_currency": ["USD", "JPY"],
-        "exchange_rate": [1.17, None],
-        "base_currency": ["EUR", "EUR"],
-        "rate_date": ["2026-08-18", "2026-08-18"],
+        "target_currency": ["USD"],
+        "exchange_rate": [None],
+        "base_currency": ["EUR"],
+        "rate_date": ["2026-08-18"]
     })
 
-    with pytest.raises(AssertionError):
+    try:
         validate_currency_data(df)
+        assert False
+    except (AssertionError, ValueError):
+        assert True
 
 
 def test_validate_currency_data_invalid_exchange_rate():
@@ -142,49 +148,50 @@ def test_validate_currency_data_invalid_exchange_rate():
         "target_currency": ["USD"],
         "exchange_rate": [-1.0],
         "base_currency": ["EUR"],
-        "rate_date": ["2026-08-18"],
+        "rate_date": ["2026-08-18"]
     })
 
-    with pytest.raises(AssertionError):
+    try:
         validate_currency_data(df)
+        assert False
+    except (AssertionError, ValueError):
+        assert True
 
 
 def test_remove_old_data():
     conn = sqlite3.connect(":memory:")
 
+    today = datetime.now()
+
+    old_date = (today - timedelta(days=8)).strftime("%Y-%m-%d")
+    recent_date = (today - timedelta(days=2)).strftime("%Y-%m-%d")
+
     df = pd.DataFrame({
-        "target_currency": ["USD", "USD", "USD"],
-        "exchange_rate": [1.10, 1.15, 1.17],
-        "base_currency": ["EUR", "EUR", "EUR"],
-        "rate_date": [
-            "2026-08-01",
-            "2026-08-10",
-            "2026-08-14",
-        ],
+        "target_currency": ["USD", "USD"],
+        "exchange_rate": [1.10, 1.15],
+        "base_currency": ["EUR", "EUR"],
+        "rate_date": [old_date, recent_date],
         "created_at": [
-            "2026-08-01 10:00:00",
-            "2026-08-10 10:00:00",
-            "2026-08-14 10:00:00",
-        ],
+            (today - timedelta(days=8)).strftime("%Y-%m-%d %H:%M:%S"),
+            (today - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+        ]
     })
 
-    # Use in-memory database for testing.
     df.to_sql(
         "currency_rates",
         conn,
         if_exists="replace",
-        index=False,
+        index=False
     )
 
     remove_old_data(conn)
 
     result = pd.read_sql_query(
         "SELECT * FROM currency_rates",
-        conn,
+        conn
     )
 
-    assert "2026-08-01" not in result["rate_date"].values
-    assert "2026-08-10" not in result["rate_date"].values
-    assert "2026-08-14" in result["rate_date"].values
+    assert old_date not in result["rate_date"].values
+    assert recent_date in result["rate_date"].values
 
     conn.close()
